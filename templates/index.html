@@ -1654,7 +1654,8 @@
                 const fileUrl = urls.find(u => u.fileKey === file);
 
                 if (fileUrl) {
-                    navigator.clipboard.writeText(fileUrl.url);
+                    // Copy the clean public link; fall back to presigned R2 URL.
+                    navigator.clipboard.writeText(fileUrl.publicUrl || fileUrl.url);
                     showToast('URL copied to clipboard!');
                 } else {
                     showToast('Failed to get file URL', 'error');
