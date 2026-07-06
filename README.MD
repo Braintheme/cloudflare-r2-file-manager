@@ -38,7 +38,8 @@
 
 ## Prerequisites
 
-- Node.js (v14 or above)
+- Node.js (v18 or above)
+- pnpm (`npm install -g pnpm` or `corepack enable`)
 - Cloudflare R2 account and API credentials
 
 ## Setup
@@ -53,35 +54,65 @@
 2. **Install dependencies:**
 
     ```bash
-    npm install
+    pnpm install
     ```
 
-3. **Create an .env file** in the root directory with the following content:
+3. **Create your `.env`** from the template and fill in your values:
 
     ```bash
-    PORT=3000
-    AWS_ACCESS_KEY_ID=<your-cloudflare-r2-access-key>
-    AWS_SECRET_ACCESS_KEY=<your-cloudflare-r2-secret-key>
-    R2_BUCKET_NAME=<your-cloudflare-r2-bucket-name>
-    R2_BUCKET=<your-cloudflare-r2-bucket-name>
-    R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+    cp env.dist .env
     ```
 
-    Replace `<your-cloudflare-r2-access-key>`, `<your-cloudflare-r2-secret-key>`, `<your-cloudflare-r2-bucket-name>`, and `<account-id>` with your Cloudflare R2 credentials.
+    ```bash
+    PORT=3005
+    AWS_ACCESS_KEY_ID=<your-r2-access-key>
+    AWS_SECRET_ACCESS_KEY=<your-r2-secret-key>
+    R2_BUCKET_NAME=<your-bucket>
+    R2_BUCKET=<your-bucket>
+    R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+
+    # Public base for download links (used by the "copy link" button)
+    PUBLIC_DOWNLOAD_BASE=https://dl.example.com/download
+
+    # Deploy target (used by `pnpm run deploy`)
+    DEPLOY_HOSTNAME=root@203.0.113.10
+    DEPLOY_DESTINATION=/var/www/storage.example.com
+    DEPLOY_SERVICE=r2-manager
+    DEPLOY_OWNER=www-data:www-data
+    ```
 
 ## Running the Server
 
 To start the server, run:
 
 ```bash
-npm start
+pnpm start
 ```
 
-The server will be available at `http://localhost:3000`
+The server will be available at `http://localhost:3005`
+
+## What's different in this fork
+
+- **Public download links** — a `GET /download/*` route streams objects straight from R2, so the raw R2 URL and presigned signatures are never exposed. The **copy-link** button copies `PUBLIC_DOWNLOAD_BASE/<key>` instead of a presigned URL.
+- **Environment-driven config** — all settings live in `.env` (see `env.dist`), including `PUBLIC_DOWNLOAD_BASE` and the deploy target.
+- **pnpm** — the project uses pnpm (pinned via the `packageManager` field); `.npmrc` sets `node-linker=hoisted` so the deployed `node_modules` is self-contained.
+- **One-command deploy** — `pnpm run deploy` rsyncs the project and restarts the service (see below).
+
+## Deployment
+
+Deployment uses `gulp-rsync` (see `gulpfile.js`) and is configured entirely via the `DEPLOY_*` variables in `.env`:
+
+```bash
+pnpm run deploy
+```
+
+> Use `pnpm run deploy` (with `run`) — `pnpm deploy` is a built-in pnpm command and will not run this script.
+
+This uploads the project via rsync, runs `pnpm install --prod` on the server, fixes ownership and restarts the `DEPLOY_SERVICE` systemd unit. `node_modules`, `.git`, `gulpfile.js` and `env.dist` are excluded from the upload.
 
 ## Web Interface
 
-Once the server is running, visit `http://localhost:3000` in your browser to access the web interface:
+Once the server is running, visit `http://localhost:3005` in your browser to access the web interface:
 
 ### Features:
 - **File Browser**: Navigate through your folders with breadcrumb navigation
