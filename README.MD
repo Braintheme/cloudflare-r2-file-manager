@@ -103,12 +103,18 @@ The server will be available at `http://localhost:3005`
 Deployment uses `gulp-rsync` (see `gulpfile.js`) and is configured entirely via the `DEPLOY_*` variables in `.env`:
 
 ```bash
-pnpm run deploy
+pnpm run deploy        # app + nginx configs
+pnpm run deploy:nginx  # nginx configs only
 ```
 
 > Use `pnpm run deploy` (with `run`) — `pnpm deploy` is a built-in pnpm command and will not run this script.
 
-This uploads the project via rsync, runs `pnpm install --prod` on the server, fixes ownership and restarts the `DEPLOY_SERVICE` systemd unit. `node_modules`, `.git`, `gulpfile.js` and `env.dist` are excluded from the upload.
+`pnpm run deploy` does two things:
+
+1. **App** — rsyncs the project to `DEPLOY_DESTINATION`, runs `pnpm install --prod` on the server, fixes ownership and restarts the `DEPLOY_SERVICE` systemd unit. `node_modules`, `.git`, `deploy/`, `gulpfile.js` and `env.dist` are excluded from the upload.
+2. **nginx** — uploads the site configs from `deploy/nginx/` to `/etc/nginx/sites-available/`, enables them in `sites-enabled/`, runs `nginx -t` and reloads nginx **only if the test passes**.
+
+The nginx configs in `deploy/nginx/` are the source of truth — edit them there and redeploy. The server-specific files they reference (`/etc/nginx/ssl/origin.crt`, `/etc/nginx/.htpasswd_storage`) live on the server and are not kept in the repo.
 
 ## Web Interface
 

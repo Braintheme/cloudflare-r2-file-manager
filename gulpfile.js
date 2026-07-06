@@ -1,6 +1,7 @@
 const { src, series } = require("gulp");
 const rsync = require("gulp-rsync");
 const { exec } = require("child_process");
+const fs = require("fs");
 require("dotenv").config();
 
 // Deploy settings come from .env (see env.dist)
@@ -8,6 +9,9 @@ const HOSTNAME = process.env.DEPLOY_HOSTNAME;
 const DESTINATION = process.env.DEPLOY_DESTINATION;
 const SERVICE = process.env.DEPLOY_SERVICE;
 const OWNER = process.env.DEPLOY_OWNER || "www-data:www-data";
+
+// Local dir with nginx site configs -> /etc/nginx/sites-available
+const NGINX_DIR = "deploy/nginx";
 
 // Fail early if required settings are missing
 function checkConfig(cb) {
@@ -23,7 +27,7 @@ function checkConfig(cb) {
 
 // Upload project files to the server via rsync
 function upload() {
-    return src(["./**", "!./node_modules/**", "!./.git/**"], { dot: true })
+    return src(["./**", "!./node_modules/**", "!./.git/**", "!./deploy/**"], { dot: true })
         .pipe(
             rsync({
                 root: "./",
@@ -37,6 +41,7 @@ function upload() {
                 exclude: [
                     "node_modules",
                     ".git",
+                    "deploy",
                     "gulpfile.js",
                     "env.dist",
                     "**/*.log",
@@ -64,5 +69,37 @@ function restart(cb) {
     });
 }
 
-exports.deploy = series(checkConfig, upload, restart);
+// Upload nginx site configs to /etc/nginx/sites-available
+function uploadNginx() {
+    return src(`${NGINX_DIR}/*`).pipe(
+        rsync({
+            root: `${NGINX_DIR}/`,
+            hostname: HOSTNAME,
+            destination: "/etc/nginx/sites-available/",
+            recursive: true,
+            silent: false
+        })
+    );
+}
+
+// Enable the sites, test config, reload nginx (reload only if the test passes)
+function reloadNginx(cb) {
+    const sites = fs.readdirSync(NGINX_DIR).filter((f) => !f.startsWith("."));
+    const link = sites
+        .map((s) => `ln -sf ../sites-available/${s} /etc/nginx/sites-enabled/${s}`)
+        .join(" && ");
+    const remote = `${link} && nginx -t && systemctl reload nginx && echo "nginx reloaded"`;
+
+    exec(`ssh -o BatchMode=yes ${HOSTNAME} "${remote}"`, (err, stdout, stderr) => {
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+        cb(err);
+    });
+}
+
+// nginx config only
+exports.deployNginx = series(checkConfig, uploadNginx, reloadNginx);
+
+// full deploy: app + nginx
+exports.deploy = series(checkConfig, upload, restart, uploadNginx, reloadNginx);
 exports.default = exports.deploy;
