@@ -50,7 +50,7 @@ function upload() {
 function restart(cb) {
     const remote = [
         `cd ${DESTINATION}`,
-        `npm install --omit=dev --no-audit --no-fund`,
+        `pnpm install --prod --frozen-lockfile`,
         `chown -R ${OWNER} ${DESTINATION}`,
         `[ -f ${DESTINATION}/.env ] && chmod 600 ${DESTINATION}/.env`,
         `systemctl restart ${SERVICE}`,
