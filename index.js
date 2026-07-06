@@ -26,6 +26,15 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const BUCKET_NAME = process.env.R2_BUCKET_NAME;
 
+// Public base URL for download links (see .env), no trailing slash
+const PUBLIC_DOWNLOAD_BASE = (process.env.PUBLIC_DOWNLOAD_BASE || "").replace(/\/$/, "");
+
+// Build a public link from an object key, encoding each path segment
+const buildPublicUrl = (key) =>
+    PUBLIC_DOWNLOAD_BASE
+        ? `${PUBLIC_DOWNLOAD_BASE}/${key.split("/").map(encodeURIComponent).join("/")}`
+        : null;
+
 // Helper to convert S3 streams to strings
 const streamToString = async (stream) => {
     const chunks = [];
@@ -37,6 +46,29 @@ const streamToString = async (stream) => {
 
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "templates/index.html"));
+});
+
+// Public download: stream the object straight from R2 (no R2 URL exposed)
+app.get(/^\/download\/(.+)/, async (req, res) => {
+    const key = decodeURIComponent(req.params[0]);
+
+    try {
+        const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+
+        if (data.ContentType) res.setHeader("Content-Type", data.ContentType);
+        if (data.ContentLength != null) res.setHeader("Content-Length", data.ContentLength);
+
+        const filename = key.split("/").pop();
+        res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+
+        data.Body.on("error", () => res.destroy());
+        data.Body.pipe(res);
+    } catch (error) {
+        if (error.name === "NoSuchKey" || error.name === "NotFound") {
+            return res.status(404).send("File not found");
+        }
+        res.status(500).send("Error downloading file");
+    }
 });
 
 // 1. Create a file inside a folder
@@ -387,7 +419,8 @@ app.get("/get-file-urls", async (req, res) => {
 
                 const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET_NAME, Key: fileKey }), urlOptions);
 
-                return { fileKey, url };
+                // publicUrl: clean link via own domain; url: presigned R2 fallback
+                return { fileKey, url, publicUrl: buildPublicUrl(fileKey) };
             })
         );
 
