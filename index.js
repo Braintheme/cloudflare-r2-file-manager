@@ -35,6 +35,31 @@ const buildPublicUrl = (key) =>
         ? `${PUBLIC_DOWNLOAD_BASE}/${key.split("/").map(encodeURIComponent).join("/")}`
         : null;
 
+// Cyrillic -> Latin transliteration for clean, readable file names
+const TRANSLIT = {
+    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z",
+    и: "i", й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r",
+    с: "s", т: "t", у: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh",
+    щ: "shch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya"
+};
+
+const transliterate = (str) => str.replace(/[а-яё]/gi, (ch) => TRANSLIT[ch.toLowerCase()] ?? ch);
+
+// Normalize a file name to clean, lowercase kebab-case, keeping the extension
+const sanitizeFileName = (name) => {
+    const toKebab = (s) =>
+        transliterate(s)
+            .normalize("NFKD").replace(/[̀-ͯ]/g, "") // strip diacritics
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+
+    const dot = name.lastIndexOf(".");
+    const base = toKebab(dot > 0 ? name.slice(0, dot) : name) || "file";
+    const ext = dot > 0 ? name.slice(dot + 1).replace(/[^a-zA-Z0-9]/g, "").toLowerCase() : "";
+    return ext ? `${base}.${ext}` : base;
+};
+
 // Helper to convert S3 streams to strings
 const streamToString = async (stream) => {
     const chunks = [];
@@ -371,22 +396,39 @@ app.post(
         }
 
         try {
-            const uploadPromises = files.map((file) => {
-                const params = {
+            // Build clean kebab-case names, unique within this upload batch
+            const usedNames = new Set();
+            const uniqueName = (name) => {
+                if (!usedNames.has(name)) { usedNames.add(name); return name; }
+                const dot = name.lastIndexOf(".");
+                const base = dot > 0 ? name.slice(0, dot) : name;
+                const ext = dot > 0 ? name.slice(dot) : "";
+                let i = 1, candidate;
+                do { candidate = `${base}-${i++}${ext}`; } while (usedNames.has(candidate));
+                usedNames.add(candidate);
+                return candidate;
+            };
+
+            const prepared = files.map((file) => {
+                // multer/busboy decodes the multipart filename as latin1 — restore UTF-8
+                const original = Buffer.from(file.originalname, "latin1").toString("utf8");
+                return { file, name: uniqueName(sanitizeFileName(original)) };
+            });
+
+            const uploadPromises = prepared.map(({ file, name }) => {
+                const command = new PutObjectCommand({
                     Bucket: BUCKET_NAME,
-                    Key: `${folder}/${file.originalname}`,
+                    Key: `${folder}/${name}`,
                     Body: file.buffer,
                     ContentType: file.mimetype
-                };
-
-                const command = new PutObjectCommand(params);
+                });
                 return s3.send(command);
             });
 
             await Promise.all(uploadPromises);
             res.status(201).send({
                 message: "Files uploaded successfully",
-                fileNames: files.map((file) => file.originalname)
+                fileNames: prepared.map((p) => p.name)
             });
         } catch (error) {
             res.status(500).send({ error: error.message });
