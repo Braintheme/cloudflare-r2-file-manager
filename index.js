@@ -428,7 +428,12 @@ app.post(
             await Promise.all(uploadPromises);
             res.status(201).send({
                 message: "Files uploaded successfully",
-                fileNames: prepared.map((p) => p.name)
+                fileNames: prepared.map((p) => p.name),
+                // Ready-to-use public links (same URL the "Copy URL" button gives)
+                files: prepared.map((p) => {
+                    const key = `${folder}/${p.name}`;
+                    return { fileName: p.name, key, url: buildPublicUrl(key) };
+                })
             });
         } catch (error) {
             res.status(500).send({ error: error.message });
